@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Chat Test</title>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f0f2f5;
+        }
+        .container {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            background-color: #fff;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        input, button {
+            margin: 10px 0;
+            padding: 10px;
+            width: 100%;
+            box-sizing: border-box;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover:not(:disabled) {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        #messages {
+            border: 1px solid #ddd;
+            height: 350px;
+            overflow-y: auto;
+            padding: 10px;
+            margin: 20px 0;
+            background-color: #f9f9f9;
+            border-radius: 4px;
+            display: flex;
+            flex-direction: column;
+        }
+        .message {
+            margin: 5px 0;
+            padding: 8px;
+            background-color: white;
+            border-radius: 4px;
+            border-left: 3px solid #4CAF50;
+            word-wrap: break-word;
+            max-width: 80%;
+        }
+        .my-message {
+            border-left: 3px solid #2196F3;
+            align-self: flex-end;
+            background-color: #e3f2fd;
+        }
+        .status {
+            color: #666;
+            font-style: italic;
+            text-align: center;
+            font-size: 0.9em;
+            margin: 10px 0;
+            width: 100%;
+        }
+        .error {
+            color: #d32f2f;
+            font-weight: bold;
+            background-color: #ffebee;
+            border-left: 3px solid #f44336;
+        }
+        .loading { color: #FF9800; }
+        .reconnecting { color: #FF5722; }
+        .disconnected { color: #d32f2f; }
+        .no-history-message { color: #999; font-size: 0.9em; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>WebSocket Chat Test Client</h1>
+
+        <div>
+            <label>User ID:</label>
+            <input type="text" id="userId" placeholder="user123" value="user123">
+        </div>
+
+        <div>
+            <label>Room ID:</label>
+            <input type="text" id="roomId" placeholder="room456" value="room456">
+        </div>
+
+        <button id="connectBtn" onclick="startConnection()">Connect</button>
+        <button id="disconnectBtn" onclick="forceDisconnect()" disabled>Disconnect</button>
+
+        <div id="messages"></div>
+
+        <div>
+            <input type="text" id="messageInput" placeholder="Type a message..." disabled onkeypress="handleKeyPress(event)">
+            <button id="sendBtn" onclick="sendMessage()" disabled>Send</button>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let currentUserId = '';
+        let currentRoomId = '';
+        let lastMessageTimestamp = null;
+        let isLoadingMessages = false;
+        let isLastMessage = false;
+        let isConnected = false;
+        let isManualDisconnect = false;
+        let reconnectAttempts = 0;
+        const MAX_RECONNECT_DELAY = 10000;
+        const BASE_DELAY = 1000;
+
+        // 재연결 가능한 close code
+        const RECONNECTABLE_CODES = new Set([1001, 1012, 1013, 1011, 1006]);
+
+        function addMessage(text, type = 'status', id = null) {
+            const messagesDiv = document.getElementById('messages');
+            let el = id ? document.getElementById(id) : null;
+
+            if (el) {
+                el.textContent = text;
+                return;
+            }
+
+            el = document.createElement('div');
+            if (id) el.id = id;
+
+            el.className = type;
+            if (type === 'error') el.classList.add('error');
+            if (type === 'status' && text.includes('Reconnecting')) el.classList.add('reconnecting');
+            if (type === 'status' && text.includes('Disconnected')) el.classList.add('disconnected');
+
+            el.textContent = text;
+            messagesDiv.appendChild(el);
+
+            if (!['status', 'error'].includes(type)) {
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            }
+        }
+
+        function removeMessageById(id) {
+            const el = document.getElementById(id);
+            if (el) el.remove();
+        }
+
+        async function loadMessages(beforeTimestamp = null, isInitialLoad = false) {
+            if (!isConnected || isManualDisconnect) {
+                return;
+            }
+
+            if (isLoadingMessages || (isLastMessage && !isInitialLoad)) {
+                if (isLastMessage && !document.getElementById('all-loaded-status')) {
+                    addMessage('모든 메시지를 불러왔습니다.', 'status', 'all-loaded-status');
+                }
+                return;
+            }
+
+            isLoadingMessages = true;
+            removeMessageById('all-loaded-status');
+
+            const roomId = document.getElementById('roomId').value;
+            const limit = 30;
+            const baseUrl = 'http://localhost:8002';
+            let url = `${baseUrl}/rooms/${roomId}/messages?limit=${limit}`;
+            if (beforeTimestamp) {
+                url += `&last_message_timestamp=${encodeURIComponent(beforeTimestamp)}`;
+            }
+
+            const loadingId = beforeTimestamp ? 'loading-prev' : 'loading-latest';
+            addMessage(beforeTimestamp ? '이전 메시지 불러오는 중...' : '최신 메시지 불러오는 중...', 'status', loadingId);
+
+            try {
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+                const data = await response.json();
+                removeMessageById(loadingId);
+
+                if (isInitialLoad) {
+                    document.getElementById('messages').innerHTML = '';
+                    removeMessageById('no-history');
+                }
+
+                const messagesDiv = document.getElementById('messages');
+                const prevHeight = messagesDiv.scrollHeight;
+                const prevTop = messagesDiv.scrollTop;
+
+                isLastMessage = data.is_last;
+                if (data.messages?.length > 0) {
+                    lastMessageTimestamp = data.messages[data.messages.length - 1].timestamp;
+                } else {
+                    lastMessageTimestamp = null;
+                }
+
+                displayMessages(data.messages, !isInitialLoad);
+
+                if (isLastMessage && !beforeTimestamp && data.messages.length === 0) {
+                    addMessage('채팅 기록이 없습니다.', 'status', 'no-history');
+                } else if (isLastMessage && beforeTimestamp) {
+                    addMessage('모든 메시지를 불러왔습니다.', 'status', 'all-loaded-status');
+                }
+
+                if (!isInitialLoad && data.messages.length > 0) {
+                    messagesDiv.scrollTop = prevTop + (messagesDiv.scrollHeight - prevHeight);
+                } else if (isInitialLoad) {
+                    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+                }
+
+            } catch (e) {
+                removeMessageById(loadingId);
+                addMessage(`로드 실패: ${e.message}`, 'error');
+            } finally {
+                isLoadingMessages = false;
+            }
+        }
+
+        function displayMessages(messages, prepend = false) {
+            const messagesDiv = document.getElementById('messages');
+            const fragment = document.createDocumentFragment();
+            const list = prepend ? messages : [...messages].reverse();
+
+            list.forEach(msg => {
+                const date = new Date(msg.timestamp);
+                const time = date.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+                const isMine = msg.sender_id === currentUserId;
+                const text = `[${msg.sender_id}] ${time}: ${msg.content}`;
+
+                const div = document.createElement('div');
+                div.className = isMine ? 'message my-message' : 'message';
+                div.textContent = text;
+                div.dataset.messageId = msg.id;
+
+                if (prepend) {
+                    fragment.insertBefore(div, fragment.firstChild);
+                } else {
+                    fragment.appendChild(div);
+                }
+            });
+
+            if (prepend) {
+                messagesDiv.insertBefore(fragment, messagesDiv.firstChild);
+            } else {
+                messagesDiv.appendChild(fragment);
+            }
+        }
+
+        function connectWebSocket() {
+            if (isManualDisconnect) return;
+
+            const userId = document.getElementById('userId').value.trim();
+            const roomId = document.getElementById('roomId').value.trim();
+
+            if (!userId || !roomId) {
+                addMessage('User ID와 Room ID를 입력하세요.', 'error');
+                return;
+            }
+
+            currentUserId = userId;
+            currentRoomId = roomId;
+
+            const wsUrl = `ws://localhost:8001/ws/${roomId}?user_id=${userId}`;
+            ws = new WebSocket(wsUrl);
+            ws.binaryType = 'arraybuffer';
+
+            const isReconnect = reconnectAttempts > 0;
+            addMessage(isReconnect ? `재연결 시도 중... (${reconnectAttempts})` : '연결 중...', 'status', 'connection-status');
+
+            ws.onopen = () => {
+                reconnectAttempts = 0;
+                isConnected = true;
+                isManualDisconnect = false;
+
+                removeMessageById('connection-status');
+                addMessage('연결 성공!', 'status');
+                document.getElementById('connectBtn').disabled = true;
+                document.getElementById('disconnectBtn').disabled = false;
+                document.getElementById('messageInput').disabled = false;
+                document.getElementById('sendBtn').disabled = false;
+
+                loadMessages(null, true);
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    removeMessageById('no-history');
+
+                    const decoder = new TextDecoder('utf-8');
+                    const jsonString = decoder.decode(event.data);
+                    const data = JSON.parse(jsonString);
+
+                    // 서버 에러 메시지 처리
+                    if (data.type === 'error') {
+                        const msg = data.message || '서버 오류';
+                        const retry = data.retry_after ? ` (${data.retry_after}s 후 재시도)` : '';
+                        addMessage(`[서버] ${msg}${retry}`, 'error');
+
+                        if (data.should_reconnect) {
+                            setTimeout(() => attemptReconnect(), (data.retry_after || 1) * 1000);
+                        }
+                        return;
+                    }
+
+                    // 일반 채팅 메시지
+                    const realTimeMessage = [{
+                        id: data.seq,
+                        content: data.content,
+                        sender_id: data.user_id,
+                        timestamp: data.timestamp
+                    }];
+                    displayMessages(realTimeMessage, false);
+                    document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
+
+                } catch (e) {
+                    console.error('Message parse error:', e);
+                }
+            };
+
+            ws.onerror = () => {
+                addMessage('연결 오류 발생', 'error');
+            };
+
+            ws.onclose = (event) => {
+                isConnected = false;
+                document.getElementById('connectBtn').disabled = false;
+                document.getElementById('disconnectBtn').disabled = true;
+                document.getElementById('messageInput').disabled = true;
+                document.getElementById('sendBtn').disabled = true;
+
+                const code = event.code;
+                const reason = event.reason || 'Unknown';
+
+                if (isManualDisconnect) {
+                    addMessage('연결이 끊겼습니다. (수동 종료)', 'status', 'connection-status');
+                    return;
+                }
+
+                if (RECONNECTABLE_CODES.has(code)) {
+                    attemptReconnect();
+                } else {
+                    addMessage(`연결 종료: ${code} (${reason})`, 'status', 'connection-status');
+                }
+            };
+        }
+
+        function attemptReconnect() {
+            if (isManualDisconnect) return;
+
+            reconnectAttempts++;
+            const delay = Math.min(BASE_DELAY * (2 ** (reconnectAttempts - 1)), MAX_RECONNECT_DELAY);
+            addMessage(`재연결 시도 중... (${reconnectAttempts}, ${delay/1000}s 후)`, 'status', 'reconnect-status');
+
+            setTimeout(() => {
+                if (!isManualDisconnect) {
+                    connectWebSocket();
+                }
+            }, delay);
+        }
+
+        function startConnection() {
+            isManualDisconnect = false;
+            reconnectAttempts = 0;
+            connectWebSocket();
+        }
+
+        function forceDisconnect() {
+            isManualDisconnect = true;
+            if (ws) {
+                ws.close();
+            }
+            cleanupConnection();
+        }
+
+        function cleanupConnection() {
+            isConnected = false;
+            reconnectAttempts = 0;
+            removeMessageById('reconnect-status');
+            addMessage('연결이 끊겼습니다. 과거 메시지 조회 불가.', 'status', 'disconnected');
+        }
+
+        function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const msg = input.value.trim();
+            if (msg && ws && ws.readyState === WebSocket.OPEN) {
+                const encoder = new TextEncoder();
+                const payload = { content: msg };
+                const jsonStr = JSON.stringify(payload);
+                const binary = encoder.encode(jsonStr);
+                ws.send(binary);
+
+                input.value = '';
+            } else if (msg) {
+                alert('연결되지 않았습니다.');
+            }
+        }
+
+        function handleKeyPress(e) {
+            if (e.key === 'Enter') sendMessage();
+        }
+
+        // 스크롤 시 이전 메시지 로드
+        document.addEventListener('DOMContentLoaded', () => {
+            const messagesDiv = document.getElementById('messages');
+            messagesDiv.addEventListener('scroll', () => {
+                if (!isConnected || isManualDisconnect) return;
+
+                const nearTop = messagesDiv.scrollTop <= 50;
+                if (nearTop && !isLoadingMessages && lastMessageTimestamp && !isLastMessage) {
+                    loadMessages(lastMessageTimestamp, false);
+                }
+            });
+        });
+    </script>
+</body>
+</html>

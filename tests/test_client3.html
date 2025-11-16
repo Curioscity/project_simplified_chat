@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Slack-like Chat</title>
+    <meta charset="UTF-8">
+    <style>
+        :root {
+            --slack-bg: #f8f9fa;
+            --slack-message-bg: white;
+            --slack-my-message: #e8f5e8;
+            --slack-border: #e0e0e0;
+            --slack-text: #2c2d30;
+            --slack-muted: #616161;
+            --slack-green: #2eb886;
+            --slack-red: #e01e5a;
+            --slack-blue: #1264a3;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--slack-bg);
+            color: var(--slack-text);
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+        }
+
+        /* === 입장 화면 === */
+        #loginScreen {
+            background: white;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 380px;
+            text-align: center;
+        }
+
+        #loginScreen h1 {
+            margin-bottom: 24px;
+            font-size: 24px;
+            font-weight: 700;
+        }
+
+        .input-group {
+            margin-bottom: 16px;
+            text-align: left;
+        }
+
+        label {
+            display: block; margin-bottom: 6px; font-weight: 600; font-size: 14px;
+        }
+
+        input {
+            width: 100%; padding: 10px 12px; border: 1px solid var(--slack-border);
+            border-radius: 8px; font-size: 15px;
+        }
+
+        input:focus {
+            outline: none; border-color: var(--slack-blue);
+            box-shadow: 0 0 0 2px rgba(18,100,163,0.1);
+        }
+
+        #enterBtn {
+            background: var(--slack-green); color: white; border: none; padding: 12px;
+            border-radius: 8px; font-weight: 600; font-size: 16px; cursor: pointer;
+            width: 100%; margin-top: 12px;
+        }
+
+        #enterBtn:disabled { background: #ccc; cursor: not-allowed; }
+
+        /* === 채팅 화면 === */
+        #chatScreen {
+            display: none; flex-direction: column; width: 100%; height: 100vh;
+            max-width: 1000px; background: white; box-shadow: 0 0 20px rgba(0,0,0,0.05);
+        }
+
+        .header {
+            padding: 12px 20px; border-bottom: 1px solid var(--slack-border);
+            display: flex; align-items: center; justify-content: space-between;
+            font-weight: 600; font-size: 18px;
+        }
+
+        .header-left { display: flex; align-items: center; gap: 8px; }
+
+        .status-indicator {
+            width: 10px; height: 10px; border-radius: 50%; background: #43b581; display: inline-block;
+        }
+        .status-indicator.offline { background: var(--slack-red); }
+
+        #leaveBtn {
+            background: transparent; color: var(--slack-red); border: 1px solid var(--slack-red);
+            padding: 6px 12px; border-radius: 6px; font-size: 14px; font-weight: 600;
+            cursor: pointer; transition: 0.2s;
+        }
+
+        #leaveBtn:hover { background: #ffebee; }
+
+        .messages-container {
+            flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 4px;
+        }
+
+        .message-group { display: flex; margin-bottom: 16px; max-width: 80%; }
+        .message-group.my { align-self: flex-end; flex-direction: row-reverse; }
+
+        .avatar {
+            width: 36px; height: 36px; border-radius: 6px; background: #ccc;
+            margin: 0 8px; flex-shrink: 0; font-size: 14px; color: white;
+            display: flex; align-items: center; justify-content: center; font-weight: bold;
+        }
+
+        .message-content { flex: 1; }
+
+        .message-header {
+            display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; font-size: 14px;
+        }
+
+        .sender-name { font-weight: 600; font-size: 15px; }
+        .timestamp { font-size: 12px; color: var(--slack-muted); }
+
+        .message-bubble {
+            background: var(--slack-message-bg); padding: 8px 12px; border-radius: 18px;
+            font-size: 15px; line-height: 1.4; box-shadow: 0 1px 1px rgba(0,0,0,0.05);
+            word-wrap: break-word; overflow-wrap: anywhere; white-space: pre-wrap;
+        }
+
+        .message-group.my .message-bubble {
+            background: var(--slack-my-message); border-bottom-right-radius: 4px;
+        }
+
+        .message-group:not(.my) .message-bubble {
+            border-bottom-left-radius: 4px;
+        }
+
+        .input-area {
+            padding: 12px 20px; border-top: 1px solid var(--slack-border);
+            display: flex; gap: 8px; align-items: flex-end;
+        }
+
+        #messageInput {
+            flex: 1;
+            padding: 10px 14px;
+            border: 1px solid var(--slack-border);
+            border-radius: 8px;
+            font-size: 15px;
+            outline: none;
+            resize: none;
+            min-height: 40px;
+            max-height: 120px;
+            overflow-y: hidden;
+            line-height: 1.4;
+            /* 초기 높이 고정 */
+            height: 40px;
+        }
+
+        #sendBtn {
+            background: var(--slack-green); color: white; border: none;
+            padding: 10px 16px; border-radius: 8px; cursor: pointer;
+            font-weight: 600; align-self: flex-end; margin-bottom: 4px;
+        }
+
+        #sendBtn:disabled { background: #ccc; cursor: not-allowed; }
+
+        /* === 토스트 === */
+        #toastContainer {
+            position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+            z-index: 1000; display: flex; flex-direction: column; gap: 8px; align-items: center;
+        }
+
+        .toast {
+            background: #333; color: white; padding: 12px 20px; border-radius: 8px;
+            font-size: 14px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            animation: toastIn 0.3s ease-out; max-width: 400px; text-align: center;
+            opacity: 0; transition: opacity 0.3s;
+        }
+
+        .toast.show { opacity: 1; }
+        .toast.error { background: var(--slack-red); }
+        .toast.success { background: var(--slack-green); }
+
+        @keyframes toastIn {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- === 입장 화면 === -->
+    <div id="loginScreen">
+        <h1>채팅 입장</h1>
+        <div class="input-group">
+            <label>User ID (필수)</label>
+            <input type="text" id="userId" placeholder="예: alice" oninput="checkEnterBtn()">
+        </div>
+        <div class="input-group">
+            <label>Room ID (필수)</label>
+            <input type="text" id="roomId" placeholder="예: general" oninput="checkEnterBtn()">
+        </div>
+        <button id="enterBtn" onclick="enterChat()" disabled>입장하기</button>
+    </div>
+
+    <!-- === 채팅 화면 === -->
+    <div id="chatScreen">
+        <div class="header">
+            <div class="header-left">
+                <span id="statusIndicator" class="status-indicator"></span>
+                <span id="roomName">Room</span>
+            </div>
+            <button id="leaveBtn" onclick="leaveChat()">나가기</button>
+        </div>
+
+        <div id="messages" class="messages-container"></div>
+
+        <div class="input-area">
+            <textarea id="messageInput" placeholder="메시지를 입력하세요" disabled></textarea>
+            <button id="sendBtn" onclick="sendMessage()" disabled>전송</button>
+        </div>
+    </div>
+
+    <!-- === 토스트 === -->
+    <div id="toastContainer"></div>
+
+    <script>
+        // 전역 상태
+        let ws = null;
+        let currentUserId = '';
+        let currentRoomId = '';
+        let lastMessageTimestamp = null;
+        let isLoadingMessages = false;
+        let isLastMessage = false;
+        let isConnected = false;
+        let isManualDisconnect = false;
+        let reconnectAttempts = 0;
+        const MAX_RECONNECT_DELAY = 10000;
+        const BASE_DELAY = 1000;
+        const RECONNECTABLE_CODES = new Set([1001, 1012, 1013, 1011, 1006]);
+
+        // 전송 중 플래그
+        let isSending = false;
+
+        // === 토스트 ===
+        function showToast(message, type = 'error', duration = 3000) {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(() => toast.classList.add('show'), 10);
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => toast.remove(), 300);
+            }, duration);
+        }
+
+        // === 입장 로직 ===
+        function checkEnterBtn() {
+            const userId = document.getElementById('userId').value.trim();
+            const roomId = document.getElementById('roomId').value.trim();
+            document.getElementById('enterBtn').disabled = !(userId && roomId);
+        }
+
+        function enterChat() {
+            const userId = document.getElementById('userId').value.trim();
+            const roomId = document.getElementById('roomId').value.trim();
+
+            if (!userId || !roomId) {
+                showToast('User ID와 Room ID를 모두 입력하세요.');
+                return;
+            }
+
+            resetConnectionState();
+            currentUserId = userId;
+            currentRoomId = roomId;
+
+            document.getElementById('loginScreen').style.display = 'none';
+            document.getElementById('chatScreen').style.display = 'flex';
+            document.getElementById('roomName').textContent = roomId;
+
+            connectWebSocket();
+        }
+
+        function leaveChat() {
+            isManualDisconnect = true;
+            if (ws && ws.readyState !== WebSocket.CLOSED) ws.close();
+            resetConnectionState();
+            resetUIState();
+            document.getElementById('chatScreen').style.display = 'none';
+            document.getElementById('loginScreen').style.display = 'block';
+        }
+
+        function resetConnectionState() {
+            ws = null;
+            currentUserId = '';
+            currentRoomId = '';
+            lastMessageTimestamp = null;
+            isLoadingMessages = false;
+            isLastMessage = false;
+            isConnected = false;
+            isManualDisconnect = false;
+            reconnectAttempts = 0;
+            isSending = false;
+        }
+
+        function resetUIState() {
+            document.getElementById('messages').innerHTML = '';
+            document.getElementById('userId').value = '';
+            document.getElementById('roomId').value = '';
+            const input = document.getElementById('messageInput');
+            input.value = '';
+            input.disabled = true;
+            document.getElementById('sendBtn').disabled = true;
+            document.getElementById('statusIndicator').classList.add('offline');
+            document.getElementById('enterBtn').disabled = true;
+            document.getElementById('toastContainer').innerHTML = '';
+            resetInputHeight();
+        }
+
+        // === 메시지 UI ===
+        function getInitials(name) {
+            return name.slice(0, 2).toUpperCase();
+        }
+
+        function createMessageGroup(msg, isMyMessage) {
+            const group = document.createElement('div');
+            group.className = `message-group ${isMyMessage ? 'my' : ''}`;
+
+            const avatar = document.createElement('div');
+            avatar.className = 'avatar';
+            avatar.textContent = getInitials(msg.sender_id);
+
+            const content = document.createElement('div');
+            content.className = 'message-content';
+
+            const header = document.createElement('div');
+            header.className = 'message-header';
+            header.innerHTML = `
+                <span class="sender-name">${msg.sender_id}</span>
+                <span class="timestamp">${new Date(msg.timestamp).toLocaleTimeString('ko-KR', {hour: 'numeric', minute: '2-digit'})}</span>
+            `;
+
+            const bubble = document.createElement('div');
+            bubble.className = 'message-bubble';
+            bubble.textContent = msg.content;
+
+            content.appendChild(header);
+            content.appendChild(bubble);
+            group.appendChild(isMyMessage ? content : avatar);
+            group.appendChild(isMyMessage ? avatar : content);
+
+            return group;
+        }
+
+        // === 메시지 로드 ===
+        async function loadMessages(beforeTimestamp = null, isInitialLoad = false) {
+            if (!isConnected || isManualDisconnect) return;
+            if (isLoadingMessages || (isLastMessage && !isInitialLoad)) return;
+
+            isLoadingMessages = true;
+            try {
+                const limit = 30;
+                const url = `http://localhost:8002/rooms/${currentRoomId}/messages?limit=${limit}` +
+                    (beforeTimestamp ? `&last_message_timestamp=${encodeURIComponent(beforeTimestamp)}` : '');
+
+                const res = await fetch(url);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+                const data = await res.json();
+                isLastMessage = data.is_last;
+                if (data.messages?.length > 0) {
+                    lastMessageTimestamp = data.messages[data.messages.length - 1].timestamp;
+                }
+
+                const container = document.getElementById('messages');
+                const fragment = document.createDocumentFragment();
+                (beforeTimestamp ? data.messages : [...data.messages].reverse()).forEach(msg => {
+                    fragment.appendChild(createMessageGroup(msg, msg.sender_id === currentUserId));
+                });
+
+                if (beforeTimestamp) {
+                    container.insertBefore(fragment, container.firstChild);
+                } else {
+                    container.appendChild(fragment);
+                    container.scrollTop = container.scrollHeight;
+                }
+
+            } catch (e) {
+                showToast(`메시지 로드 실패: ${e.message}`);
+            } finally {
+                isLoadingMessages = false;
+            }
+        }
+
+        // === WebSocket (바이너리 전송) ===
+        async function safeDecode(data) {
+            if (typeof data === 'string') return data;
+            if (data instanceof ArrayBuffer) return new TextDecoder().decode(data);
+            if (data instanceof Blob) return new TextDecoder().decode(await data.arrayBuffer());
+            throw new Error('Invalid data type');
+        }
+
+        function connectWebSocket() {
+            if (isManualDisconnect) return;
+
+            const wsUrl = `ws://localhost:8001/ws/${currentRoomId}?user_id=${currentUserId}`;
+            ws = new WebSocket(wsUrl);
+            ws.binaryType = 'arraybuffer';
+
+            document.getElementById('statusIndicator').classList.add('offline');
+
+            ws.onopen = () => {
+                isConnected = true;
+                document.getElementById('statusIndicator').classList.remove('offline');
+                document.getElementById('messageInput').disabled = false;
+                document.getElementById('sendBtn').disabled = false;
+                showToast('연결되었습니다.', 'success');
+                loadMessages(null, true);
+            };
+
+            ws.onmessage = async (event) => {
+                try {
+                    const jsonString = await safeDecode(event.data);
+                    const data = JSON.parse(jsonString);
+
+                    if (data.type === 'error') {
+                        const msg = data.message || data.content || '알 수 없는 오류';
+                        const retry = data.retry_after ? ` (${data.retry_after}s 후 재시도)` : '';
+                        showToast(`${msg}${retry}`, 'error');
+                        return;
+                    }
+
+                    const msg = { id: data.seq, content: data.content, sender_id: data.user_id, timestamp: data.timestamp };
+                    const container = document.getElementById('messages');
+                    container.appendChild(createMessageGroup(msg, data.user_id === currentUserId));
+                    container.scrollTop = container.scrollHeight;
+
+                } catch (e) {
+                    console.error('Message parse error:', e);
+                    showToast('메시지 처리 중 오류 발생');
+                }
+            };
+
+            ws.onerror = () => showToast('연결 오류 발생');
+            ws.onclose = (e) => {
+                isConnected = false;
+                document.getElementById('statusIndicator').classList.add('offline');
+                document.getElementById('messageInput').disabled = true;
+                document.getElementById('sendBtn').disabled = true;
+
+                if (isManualDisconnect) {
+                    showToast('연결이 끊겼습니다.');
+                    return;
+                }
+
+                if (RECONNECTABLE_CODES.has(e.code)) {
+                    attemptReconnect();
+                } else {
+                    showToast(`연결 종료: ${e.code}`);
+                }
+            };
+        }
+
+        function attemptReconnect() {
+            if (isManualDisconnect) return;
+            reconnectAttempts++;
+            const delay = Math.min(BASE_DELAY * (2 ** (reconnectAttempts - 1)), MAX_RECONNECT_DELAY);
+            showToast(`재연결 시도... (${reconnectAttempts})`, 'error', delay);
+            setTimeout(connectWebSocket, delay);
+        }
+
+        // === 전송 (완전 고정) ===
+        function sendMessage() {
+            if (isSending || !ws || ws.readyState !== WebSocket.OPEN) return;
+            const input = document.getElementById('messageInput');
+            const msg = input.value.trim();
+            if (!msg) return;
+
+            isSending = true;
+
+            const encoder = new TextEncoder();
+            const payload = { content: msg };
+            const jsonStr = JSON.stringify(payload);
+            const binary = encoder.encode(jsonStr);
+            ws.send(binary);
+
+            // DOM 완전 초기화
+            input.value = '';
+            input.style.height = '40px';
+            input.style.overflowY = 'hidden';
+
+            // 다음 프레임에서 플래그 해제 + 높이 재계산
+            requestAnimationFrame(() => {
+                isSending = false;
+                adjustInputHeight();
+            });
+        }
+
+        // === textarea 높이 조절 (완전 안정화) ===
+        const textarea = document.getElementById('messageInput');
+
+        function resetInputHeight() {
+            textarea.style.height = '40px';
+            textarea.style.overflowY = 'hidden';
+            void textarea.offsetHeight; // 강제 리플로우
+        }
+
+        function adjustInputHeight() {
+            if (isSending) return;
+            textarea.style.height = '40px';
+            const newHeight = Math.min(textarea.scrollHeight, 120);
+            textarea.style.height = newHeight + 'px';
+            textarea.style.overflowY = newHeight >= 120 ? 'auto' : 'hidden';
+        }
+
+        textarea.addEventListener('input', function() {
+            if (isSending) return;
+            adjustInputHeight();
+        });
+
+        // 초기화 시 높이 고정
+        textarea.addEventListener('focus', () => {
+            if (!textarea.value) resetInputHeight();
+        });
+
+        // === 엔터 키 처리 ===
+        textarea.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        // 스크롤 로드
+        document.addEventListener('DOMContentLoaded', () => {
+            const container = document.getElementById('messages');
+            container.addEventListener('scroll', () => {
+                if (!isConnected || isManualDisconnect) return;
+                if (container.scrollTop <= 100 && !isLoadingMessages && lastMessageTimestamp && !isLastMessage) {
+                    loadMessages(lastMessageTimestamp, false);
+                }
+            });
+        });
+    </script>
+</body>
+</html>

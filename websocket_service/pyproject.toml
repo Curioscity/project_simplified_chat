@@ -1,0 +1,33 @@
+[project]
+name = "websocket-service"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "aiokafka>=0.12.0",
+    "fastapi>=0.119.0",
+    "gunicorn>=23.0.0",
+    "httpx>=0.28.1",
+    "opentelemetry-api>=1.37.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.37.0",
+    "opentelemetry-instrumentation>=0.58b0",
+    "opentelemetry-instrumentation-aiokafka>=0.58b0",
+    "opentelemetry-instrumentation-fastapi>=0.58b0",
+    "opentelemetry-instrumentation-logging>=0.58b0",
+    "opentelemetry-instrumentation-redis>=0.58b0",
+    "opentelemetry-instrumentation-system-metrics>=0.58b0",
+    "opentelemetry-sdk>=1.37.0",
+    "orjson>=3.11.3",
+    "pytest-cov>=7.0.0",
+    "redis>=6.4.0",
+    "uvicorn[standard]>=0.37.0",
+    "uvloop>=0.21.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+    "pytest-asyncio>=1.2.0",
+    "ruff>=0.14.0",
+]

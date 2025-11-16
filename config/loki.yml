@@ -1,0 +1,55 @@
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+
+ingester:
+  # Ingester 설정: WAL 경로를 /loki/wal로 변경하여 권한 문제를 해결
+  lifecycler:
+    address: 127.0.0.1
+    ring:
+      kvstore:
+        store: inmemory
+      replication_factor: 1
+    final_sleep: 0s
+  chunk_idle_period: 5m
+  chunk_retain_period: 30s
+  # 🌟 WAL 폴더 경로를 컨테이너의 쓰기 가능한 볼륨 마운트 경로(/loki) 하위로 변경
+  wal:
+    dir: /loki/wal
+
+schema_config:
+  configs:
+    - from: 2020-10-24
+      # ⚠️ 스키마 버전을 v13으로 업데이트
+      schema: v13
+      # ⚠️ 스토어 타입을 tsdb로 업데이트
+      store: tsdb
+      object_store: filesystem
+      index:
+        prefix: index_
+        period: 24h
+
+storage_config:
+  tsdb_shipper:
+    # 🌟 TSDB 관련 경로를 /loki 하위로 변경
+    active_index_directory: /loki/tsdb-shipper-active
+    cache_location: /loki/tsdb-shipper-cache
+    cache_ttl: 24h
+
+  filesystem:
+    # 🌟 청크 데이터 경로를 /loki 하위로 변경
+    directory: /loki/chunks
+
+compactor:
+  # Compactor 설정: Compactor 작업 폴더 경로를 /loki 하위로 변경
+  working_directory: /loki/boltdb-shipper-compactor
+
+limits_config:
+  allow_structured_metadata: true
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+
+# ruler:
+#   alertmanager_url: http://localhost:9093 # 현재 필요하지 않으므로 주석 처리
